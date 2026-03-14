@@ -215,6 +215,8 @@ func (p *GadgetInstance) Run(
 		p.request.ImageName,
 		gadgetcontext.WithLogger(logger),
 		gadgetcontext.WithDataOperators(ops...),
+		gadgetcontext.WithArgs(api.RunRequestArgs(p.request.Args, p.request.Token)...),
+		gadgetcontext.WithToken(p.request.Token),
 		gadgetcontext.WithAsRemoteCall(true),
 		gadgetcontext.WithName(p.name),
 		gadgetcontext.WithID(p.id),

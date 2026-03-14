@@ -119,6 +119,7 @@ func NewRunCommand(rootCmd *cobra.Command, runtime runtime.Runtime, hiddenColumn
 	var gadgetInstanceID string
 
 	var inFile string
+	var token string
 
 	var skipParams []string
 	if commandMode == CommandModeAttach {
@@ -309,6 +310,17 @@ func NewRunCommand(rootCmd *cobra.Command, runtime runtime.Runtime, hiddenColumn
 
 		timeoutDuration := time.Duration(timeoutSeconds) * time.Second
 
+		runOptions := []gadgetcontext.Option{
+			gadgetcontext.WithIsClient(runtime.IsClient()),
+			gadgetcontext.WithDataOperators(ops...),
+			gadgetcontext.WithTimeout(timeoutDuration),
+			gadgetcontext.WithUseInstance(false),
+		}
+		if token != "" {
+			runOptions = append(runOptions, gadgetcontext.WithArgs(token))
+			runOptions = append(runOptions, gadgetcontext.WithToken(token))
+		}
+
 		var image string
 		if len(args) > 0 {
 			image = args[0]
@@ -346,12 +358,7 @@ func NewRunCommand(rootCmd *cobra.Command, runtime runtime.Runtime, hiddenColumn
 			isDetach := detachedParam != nil && detachedParam.AsBool()
 
 			if isDetach {
-				return runInstanceSpecsDetached(ctx, runtime, specs, runtimeParams,
-					gadgetcontext.WithIsClient(runtime.IsClient()),
-					gadgetcontext.WithDataOperators(ops...),
-					gadgetcontext.WithTimeout(timeoutDuration),
-					gadgetcontext.WithUseInstance(false),
-				)
+				return runInstanceSpecsDetached(ctx, runtime, specs, runtimeParams, runOptions...)
 			}
 
 			if len(specs) > 1 {
@@ -378,14 +385,18 @@ func NewRunCommand(rootCmd *cobra.Command, runtime runtime.Runtime, hiddenColumn
 			image = gadgetInstanceID
 		}
 
-		gadgetCtx := gadgetcontext.New(
-			ctx,
-			image,
+		gadgetCtxOptions := []gadgetcontext.Option{
 			gadgetcontext.WithDataOperators(ops...),
 			gadgetcontext.WithTimeout(timeoutDuration),
 			gadgetcontext.WithUseInstance(commandMode == CommandModeAttach),
 			gadgetcontext.WithIsClient(runtime.IsClient()),
-		)
+		}
+		if token != "" {
+			gadgetCtxOptions = append(gadgetCtxOptions, gadgetcontext.WithArgs(token))
+			gadgetCtxOptions = append(gadgetCtxOptions, gadgetcontext.WithToken(token))
+		}
+
+		gadgetCtx := gadgetcontext.New(ctx, image, gadgetCtxOptions...)
 
 		// Write back param values
 		if info != nil {
@@ -436,6 +447,7 @@ func NewRunCommand(rootCmd *cobra.Command, runtime runtime.Runtime, hiddenColumn
 	if commandMode != CommandModeAttach {
 		AddOCIFlags(cmd, ociParams, skipParams, runtime)
 		cmd.PersistentFlags().StringVarP(&inFile, "file", "f", "", "path or remote URL (prefixed with http:// or https://) to a gadget runtime manifest file")
+		cmd.PersistentFlags().StringVar(&token, "token", "", "Token value forwarded to the gadget as run argument")
 	}
 
 	AddOCIFlags(cmd, runtimeGlobalParams, skipParams, runtime)

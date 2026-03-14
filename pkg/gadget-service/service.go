@@ -23,9 +23,11 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/inspektor-gadget/inspektor-gadget/internal/version"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/config"
@@ -41,6 +43,8 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/experimental"
 )
+
+type tokenListCRDAuthzChecker func(ctx context.Context, token, namespace string) error
 
 type RunConfig struct {
 	// SocketType can be either unix or tcp
@@ -66,6 +70,20 @@ type Service struct {
 	logger            logger.Logger
 	servers           map[*grpc.Server]struct{}
 	eventBufferLength uint64
+
+	// requireNamespace enforces that every RunGadget request carries a valid k8s.namespace filter.
+	requireNamespace bool
+	// requirePodname enforces that every RunGadget request carries a valid k8s.podname filter.
+	requirePodname bool
+	// validateToken enables request token authorization checks.
+	validateToken bool
+	// gadgetMaxTTL caps gadget runtime, 0 means disabled.
+	gadgetMaxTTL time.Duration
+
+	// tokenListCRDAuthzChecker can be injected by tests.
+	tokenListCRDAuthzChecker tokenListCRDAuthzChecker
+	// authzKubeClientset is used to validate request tokens via TokenReview and SubjectAccessReview.
+	authzKubeClientset kubernetes.Interface
 
 	// operators stores all global parameters for DataOperators (non-legacy)
 	operators map[operators.DataOperator]*params.Params
@@ -106,6 +124,39 @@ func NewService(defaultLogger logger.Logger) *Service {
 
 func (s *Service) SetEventBufferLength(val uint64) {
 	s.eventBufferLength = val
+}
+
+// SetFilterRequirements configures which filter clauses are mandatory on every RunGadget call.
+func (s *Service) SetFilterRequirements(requireNamespace, requirePodname bool) {
+	s.requireNamespace = requireNamespace
+	s.requirePodname = requirePodname
+}
+
+func (s *Service) SetTokenValidation(enabled bool) {
+	s.validateToken = enabled
+}
+
+func (s *Service) SetGadgetMaxTTL(ttl time.Duration) {
+	if ttl < 0 {
+		ttl = 0
+	}
+	s.gadgetMaxTTL = ttl
+}
+
+func (s *Service) effectiveTimeout(requestTimeout time.Duration) time.Duration {
+	if s.gadgetMaxTTL <= 0 {
+		return requestTimeout
+	}
+
+	if requestTimeout <= 0 || requestTimeout > s.gadgetMaxTTL {
+		return s.gadgetMaxTTL
+	}
+
+	return requestTimeout
+}
+
+func (s *Service) SetAuthzKubeClientset(clientset kubernetes.Interface) {
+	s.authzKubeClientset = clientset
 }
 
 func (s *Service) SetInstanceManager(mgr *instancemanager.Manager) {

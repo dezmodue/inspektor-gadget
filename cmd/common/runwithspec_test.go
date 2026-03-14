@@ -46,6 +46,7 @@ type testSpec struct {
 	Mode           testMode
 	AdditionalArgs []string
 	ExpectedParams api.ParamValues
+	ExpectedArgs   []string
 	ExpectedName   string
 	ExpectedID     string
 	ExpectedTags   []string
@@ -79,6 +80,9 @@ func (r *testRuntime) RunGadget(gadgetCtx runtime.GadgetContext, runtimeParams *
 	}
 	if r.testSpec.ExpectedTags != nil {
 		assert.Equal(r.t, r.testSpec.ExpectedTags, runtimeParams.Get(grpcruntime.ParamTags).AsStringSlice())
+	}
+	if r.testSpec.ExpectedArgs != nil {
+		assert.Equal(r.t, r.testSpec.ExpectedArgs, gadgetCtx.Args())
 	}
 	for k, v := range r.testSpec.ExpectedParams {
 		val, ok := paramValueMap[k]
@@ -181,6 +185,17 @@ paramValues:
 				"y": "z",
 				"n": "1",
 			},
+		},
+		{
+			Name: "one spec with token argument",
+			Manifest: `
+apiVersion: 1
+kind: instance-spec
+image: demo
+`,
+			Mode:           testModeInteractiveOnly,
+			AdditionalArgs: []string{"--token", "X-Long-Token: this is a very long token value with spaces and symbols =:;,_-"},
+			ExpectedArgs:   []string{"X-Long-Token: this is a very long token value with spaces and symbols =:;,_-"},
 		},
 		{
 			Name: "multiple specs with detach",

@@ -185,6 +185,8 @@ func (r *Runtime) createGadgetInstance(gadgetCtx runtime.GadgetContext, runtimeP
 			GadgetConfig: &api.GadgetRunRequest{
 				ImageName:   gadgetCtx.ImageName(),
 				ParamValues: paramValues,
+				Args:        gadgetCtx.Args(),
+				Token:       gadgetCtx.Token(),
 				Version:     api.VersionGadgetRunProtocol,
 			},
 		},

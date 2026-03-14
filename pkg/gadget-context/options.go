@@ -94,3 +94,15 @@ func WithName(name string) Option {
 		gadgetCtx.name = name
 	}
 }
+
+func WithArgs(args ...string) Option {
+	return func(gadgetCtx *GadgetContext) {
+		gadgetCtx.args = slices.Clone(args)
+	}
+}
+
+func WithToken(token string) Option {
+	return func(gadgetCtx *GadgetContext) {
+		gadgetCtx.token = token
+	}
+}

@@ -52,6 +52,9 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 	var serverKey string
 	var serverCert string
 	var clientCA string
+	var requireNamespace bool
+	var requirePodname bool
+	var validateToken bool
 
 	daemonCmd.PersistentFlags().StringVarP(
 		&group,
@@ -93,6 +96,24 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 		"",
 		"Path to CA certificate for client validation")
 
+	daemonCmd.PersistentFlags().BoolVar(
+		&requireNamespace,
+		"require-namespace",
+		false,
+		"Reject RunGadget requests that do not include a valid k8s.namespace filter clause")
+
+	daemonCmd.PersistentFlags().BoolVar(
+		&requirePodname,
+		"require-podname",
+		false,
+		"Reject RunGadget requests that do not include a valid k8s.podname filter clause")
+
+	daemonCmd.PersistentFlags().BoolVar(
+		&validateToken,
+		"validate-token",
+		false,
+		"Enable validation of request tokens against authorization.gadget.kinvolk.io Auth resources")
+
 	service := gadgetservice.NewService(log.StandardLogger())
 
 	for _, params := range service.GetOperatorMap() {
@@ -109,6 +130,10 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 			return fmt.Errorf("invalid daemon-socket address: %w", err)
 		}
 
+		if validateToken && !requireNamespace {
+			return fmt.Errorf("--validate-token requires --require-namespace")
+		}
+
 		gid := 0
 		if tmpGroup, err := user.LookupGroup(group); err == nil {
 			gid, err = strconv.Atoi(tmpGroup.Gid)
@@ -123,6 +148,10 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 
 		log.Infof("starting Inspektor Gadget daemon at %q", socket)
 		service.SetEventBufferLength(eventBufferLength)
+		service.SetFilterRequirements(requireNamespace, requirePodname)
+		service.SetTokenValidation(validateToken)
+		log.Infof("Policy flags: validate-token=%t require-namespace=%t require-podname=%t",
+			validateToken, requireNamespace, requirePodname)
 
 		if err = config.Config.ReadInConfig(); err != nil {
 			log.Warnf("reading config: %v", err)

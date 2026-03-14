@@ -173,6 +173,7 @@ func (r *Runtime) runGadget(gadgetCtx runtime.GadgetContext, target target, allP
 					ImageName:   gadgetCtx.ImageName(),
 					ParamValues: allParams,
 					Args:        gadgetCtx.Args(),
+					Token:       gadgetCtx.Token(),
 					LogLevel:    uint32(gadgetCtx.Logger().GetLevel()),
 					Timeout:     int64(gadgetCtx.Timeout()),
 					Version:     api.VersionGadgetRunProtocol,

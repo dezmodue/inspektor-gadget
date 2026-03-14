@@ -82,6 +82,10 @@ var (
 	liveness          bool
 	socketfile        string
 	gadgetServiceHost string
+	requireNamespace  bool
+	requirePodname    bool
+	validateToken     bool
+	gadgetMaxTTL      int
 )
 
 var clientTimeout = 2 * time.Second
@@ -89,6 +93,10 @@ var clientTimeout = 2 * time.Second
 func init() {
 	flag.StringVar(&socketfile, "liveness-socketfile", kubemanagertypes.DefaultHookAndLivenessSocketFile, "Path to socket file for liveness checks")
 	flag.StringVar(&gadgetServiceHost, "service-host", fmt.Sprintf("tcp://127.0.0.1:%d", api.GadgetServicePort), "Socket address for gadget service")
+	flag.BoolVar(&requireNamespace, "require-namespace", false, "Reject RunGadget requests that do not include a valid k8s.namespace filter clause")
+	flag.BoolVar(&requirePodname, "require-podname", false, "Reject RunGadget requests that do not include a valid k8s.podname filter clause")
+	flag.BoolVar(&validateToken, "validate-token", false, "Enable validation of request tokens against authorization.gadget.kinvolk.io Auth resources")
+	flag.IntVar(&gadgetMaxTTL, "gadget-max-ttl", 0, "Maximum gadget runtime in seconds (0 disables cap)")
 
 	flag.BoolVar(&serve, "serve", false, "Start server")
 	flag.BoolVar(&liveness, "liveness", false, "Execute as client and perform liveness probe")
@@ -149,6 +157,10 @@ func main() {
 	}
 
 	if serve {
+		if validateToken && !requireNamespace {
+			log.Fatalf("--validate-token requires --require-namespace")
+		}
+
 		if err := gadgettracermanagerconfig.Init(); err != nil {
 			log.Fatalf("Initializing config: %v", err)
 		}
@@ -205,6 +217,11 @@ func main() {
 		}
 		service := gadgetservice.NewService(log.StandardLogger())
 		service.SetEventBufferLength(bufferLength)
+		service.SetFilterRequirements(requireNamespace, requirePodname)
+		service.SetTokenValidation(validateToken)
+		service.SetGadgetMaxTTL(time.Duration(gadgetMaxTTL) * time.Second)
+		log.Infof("Policy flags: validate-token=%t require-namespace=%t require-podname=%t gadget-max-ttl=%ds",
+			validateToken, requireNamespace, requirePodname, gadgetMaxTTL)
 
 		mgr, err := instancemanager.New(local.New())
 		if err != nil {
@@ -221,6 +238,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("initializing store: %v", err)
 		}
+		service.SetAuthzKubeClientset(store.KubernetesClientset())
 
 		service.SetStore(store)
 		service.SetInstanceManager(mgr)

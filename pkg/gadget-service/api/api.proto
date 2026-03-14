@@ -38,6 +38,9 @@ message GadgetRunRequest {
   // time that a gadget should run; use 0, if the gadget should run until it's being
   // stopped or done; time is in nanoseconds and directly converted to time.Duration
   int64 timeout = 13;
+
+  // token passed via gadgetctl --token (sensitive; do not log).
+  string token = 14;
 }
 
 message GadgetAttachRequest {

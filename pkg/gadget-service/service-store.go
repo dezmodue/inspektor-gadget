@@ -24,6 +24,15 @@ import (
 )
 
 func (s *Service) CreateGadgetInstance(ctx context.Context, request *api.CreateGadgetInstanceRequest) (*api.CreateGadgetInstanceResponse, error) {
+	if request.GadgetInstance == nil {
+		return nil, fmt.Errorf("missing gadget instance")
+	}
+
+	err := s.validateRequestTokenListCRDPermission(ctx, request.GadgetInstance.GadgetConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create random ID if not set by the client
 	if request.GadgetInstance.Id == "" {
 		var err error

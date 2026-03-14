@@ -46,6 +46,7 @@ const (
 	gadgetLogLevel = "gadgetLogLevel"
 	gadgetNodes    = "gadgetNodes"
 	gadgetTags     = "gadgetTags"
+	gadgetToken    = "gadgetToken"
 	gadgetTimeout  = "gadgetTimeout"
 )
 
@@ -58,6 +59,10 @@ type Store struct {
 	clientset       *kubernetes.Clientset
 	instanceMgr     *instancemanager.Manager
 	gadgetNamespace string
+}
+
+func (s *Store) KubernetesClientset() kubernetes.Interface {
+	return s.clientset
 }
 
 func New(mgr *instancemanager.Manager, namespace string) (*Store, error) {
@@ -264,6 +269,7 @@ func (s *Store) CreateGadgetInstance(ctx context.Context, req *api.CreateGadgetI
 				gadgetTags:     strings.Join(req.GadgetInstance.Tags, ","),
 				gadgetTimeout:  fmt.Sprintf("%d", req.GadgetInstance.GadgetConfig.Timeout),
 				gadgetLogLevel: fmt.Sprintf("%d", req.GadgetInstance.GadgetConfig.LogLevel),
+				gadgetToken:    req.GadgetInstance.GadgetConfig.Token,
 				gadgetNodes:    strings.Join(req.GadgetInstance.Nodes, ","),
 			},
 		},
@@ -350,6 +356,7 @@ func configMapToGadgetInstance(cm *corev1.ConfigMap) (*api.GadgetInstance, error
 			ParamValues: cm.Data,
 			LogLevel:    uint32(logLevel),
 			Timeout:     timeout,
+			Token:       cm.Annotations[gadgetToken],
 			Version:     api.VersionGadgetRunProtocol,
 		},
 		Nodes:       nodes,

@@ -54,6 +54,7 @@ type GadgetContext struct {
 	id            string
 	name          string
 	args          []string
+	token         string
 	runtime       runtime.Runtime
 	runtimeParams *params.Params
 	parser        parser.Parser
@@ -139,6 +140,10 @@ func (c *GadgetContext) Logger() logger.Logger {
 
 func (c *GadgetContext) Args() []string {
 	return c.args
+}
+
+func (c *GadgetContext) Token() string {
+	return c.token
 }
 
 func (c *GadgetContext) Timeout() time.Duration {
