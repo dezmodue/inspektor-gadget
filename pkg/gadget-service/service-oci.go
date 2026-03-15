@@ -36,7 +36,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/k8sutil"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/logger"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
@@ -122,6 +121,11 @@ func (s *Service) RunGadget(runGadget api.GadgetManager_RunGadgetServer) error {
 
 	attachRequest := ctrl.GetAttachRequest()
 	if attachRequest != nil {
+		err = s.validateNonInteractivePolicy(nil, true, false)
+		if err != nil {
+			return err
+		}
+
 		if attachRequest.Version != api.VersionGadgetRunProtocol {
 			return fmt.Errorf("expected version to be %d, got %d", api.VersionGadgetRunProtocol, attachRequest.Version)
 		}
@@ -159,6 +163,11 @@ func (s *Service) RunGadget(runGadget api.GadgetManager_RunGadgetServer) error {
 	}
 
 	err = s.validateFilterParams(ociRequest.ParamValues)
+	if err != nil {
+		return err
+	}
+
+	err = s.validateNonInteractivePolicy(ociRequest, false, false)
 	if err != nil {
 		return err
 	}
@@ -304,7 +313,7 @@ func (s *Service) RunGadget(runGadget api.GadgetManager_RunGadgetServer) error {
 		ociRequest.ImageName,
 		gadgetcontext.WithLogger(logger),
 		gadgetcontext.WithDataOperators(ops...),
-		gadgetcontext.WithArgs(api.RunRequestArgs(ociRequest.Args, ociRequest.Token)...),
+		gadgetcontext.WithArgs(ociRequest.Args...),
 		gadgetcontext.WithToken(ociRequest.Token),
 		gadgetcontext.WithTimeout(effectiveTimeout),
 		gadgetcontext.WithAsRemoteCall(true),
@@ -323,7 +332,7 @@ func (s *Service) RunGadget(runGadget api.GadgetManager_RunGadgetServer) error {
 const (
 	operatorFilterParamKey      = "operator.filter.filter"
 	namespaceFilterClausePrefix = "k8s.namespace=="
-	namespaceFilterValuePattern = `^[a-zA-Z0-9-]+$`
+	namespaceFilterValuePattern = `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	podnameFilterClausePrefix   = "k8s.podname~"
 	// podnameFilterValuePattern allows pod names and pod name patterns with a single wildcard
 	// this is sufficient to cover both specific pod targeting and controller-level targeting (e.g. all pods of a deployment) while keeping the pattern simple. 
@@ -380,6 +389,50 @@ func hasPodnameFilter(paramValues map[string]string) bool {
 	return hasFilterClause(paramValues, podnameFilterClausePrefix, podnameFilterValueRegex)
 }
 
+func hasDetachArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "--detach" || strings.HasPrefix(arg, "--detach=") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasAttachArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "--attach" || strings.HasPrefix(arg, "--attach=") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *Service) validateNonInteractivePolicy(request *api.GadgetRunRequest, attachRequest, createRequest bool) error {
+	if !s.denyNonInteractive {
+		return nil
+	}
+
+	if attachRequest {
+		return fmt.Errorf("requests including --attach are denied by --deny-non-interactive policy")
+	}
+
+	if createRequest {
+		return fmt.Errorf("requests including --detach are denied by --deny-non-interactive policy")
+	}
+
+	if request != nil && hasDetachArg(request.Args) {
+		return fmt.Errorf("requests including --detach are denied by --deny-non-interactive policy")
+	}
+
+	if request != nil && hasAttachArg(request.Args) {
+		return fmt.Errorf("requests including --attach are denied by --deny-non-interactive policy")
+	}
+
+	return nil
+}
+
 func namespaceFromFilterParams(paramValues map[string]string) (string, error) {
 	namespaceSet := make(map[string]struct{})
 
@@ -433,7 +486,7 @@ func (s *Service) validateRequestTokenListCRDPermission(ctx context.Context, req
 
 	token := api.EffectiveRequestToken(request.Args, request.Token)
 	if token == "" {
-		return nil
+		return errors.New("missing request token")
 	}
 
 	namespace, err := namespaceFromFilterParams(request.ParamValues)
@@ -449,10 +502,7 @@ func (s *Service) validateRequestTokenListCRDPermission(ctx context.Context, req
 	} else {
 		authzClientset := s.authzKubeClientset
 		if authzClientset == nil {
-			authzClientset, err = k8sutil.NewClientset("", "gadget-service/token-authz")
-			if err != nil {
-				return fmt.Errorf("creating Kubernetes clientset for token authorization: %w", err)
-			}
+			return errors.New("token authorization clientset is not configured")
 		}
 
 		identity, err = checkTokenCanListAuthsInNamespace(ctx, authzClientset, token, namespace)

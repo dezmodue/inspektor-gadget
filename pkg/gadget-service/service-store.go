@@ -28,7 +28,12 @@ func (s *Service) CreateGadgetInstance(ctx context.Context, request *api.CreateG
 		return nil, fmt.Errorf("missing gadget instance")
 	}
 
-	err := s.validateRequestTokenListCRDPermission(ctx, request.GadgetInstance.GadgetConfig)
+	err := s.validateNonInteractivePolicy(request.GadgetInstance.GadgetConfig, false, true)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.validateRequestTokenListCRDPermission(ctx, request.GadgetInstance.GadgetConfig)
 	if err != nil {
 		return nil, err
 	}

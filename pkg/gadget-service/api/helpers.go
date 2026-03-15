@@ -21,7 +21,6 @@ import (
 	"io"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -124,14 +123,6 @@ func SplitStringWithEscape(s string, sep rune) []string {
 		result = append(result, b.String())
 	}
 	return result
-}
-
-func RunRequestArgs(args []string, token string) []string {
-	res := slices.Clone(args)
-	if token != "" && !slices.Contains(res, token) {
-		res = append(res, token)
-	}
-	return res
 }
 
 func EffectiveRequestToken(args []string, token string) string {

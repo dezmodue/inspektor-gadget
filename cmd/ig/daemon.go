@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -34,6 +35,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
 	instancemanager "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/instance-manager"
 	filestore "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/store/file-store"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/k8sutil"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	gadgettls "github.com/inspektor-gadget/inspektor-gadget/pkg/utils/tls"
 )
@@ -55,6 +57,8 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 	var requireNamespace bool
 	var requirePodname bool
 	var validateToken bool
+	var gadgetMaxTTL int
+	var denyNonInteractive bool
 
 	daemonCmd.PersistentFlags().StringVarP(
 		&group,
@@ -114,6 +118,18 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 		false,
 		"Enable validation of request tokens against authorization.gadget.kinvolk.io Auth resources")
 
+	daemonCmd.PersistentFlags().IntVar(
+		&gadgetMaxTTL,
+		"gadget-max-ttl",
+		0,
+		"Maximum gadget runtime in seconds (0 disables cap)")
+
+	daemonCmd.PersistentFlags().BoolVar(
+		&denyNonInteractive,
+		"deny-non-interactive",
+		false,
+		"Deny interactive gadget requests (for example requests that include --detach or --attach)")
+
 	service := gadgetservice.NewService(log.StandardLogger())
 
 	for _, params := range service.GetOperatorMap() {
@@ -130,8 +146,18 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 			return fmt.Errorf("invalid daemon-socket address: %w", err)
 		}
 
+		validateTokenFlagSet := cmd.Flags().Changed("validate-token")
+		denyNonInteractiveFlagSet := cmd.Flags().Changed("deny-non-interactive")
+
 		if validateToken && !requireNamespace {
 			return fmt.Errorf("--validate-token requires --require-namespace")
+		}
+
+		if validateToken {
+			if validateTokenFlagSet && !denyNonInteractiveFlagSet {
+				log.Warn("--validate-token was enabled without --deny-non-interactive; attach and detach operations will be denied automatically")
+			}
+			denyNonInteractive = true
 		}
 
 		gid := 0
@@ -150,8 +176,21 @@ func newDaemonCommand(runtime runtime.Runtime) *cobra.Command {
 		service.SetEventBufferLength(eventBufferLength)
 		service.SetFilterRequirements(requireNamespace, requirePodname)
 		service.SetTokenValidation(validateToken)
-		log.Infof("Policy flags: validate-token=%t require-namespace=%t require-podname=%t",
-			validateToken, requireNamespace, requirePodname)
+		service.SetGadgetMaxTTL(time.Duration(gadgetMaxTTL) * time.Second)
+		service.SetDenyNonInteractive(denyNonInteractive)
+		log.Infof("Policy flag: validate-token=%t", validateToken)
+		log.Infof("Policy flag: require-namespace=%t", requireNamespace)
+		log.Infof("Policy flag: require-podname=%t", requirePodname)
+		log.Infof("Policy flag: gadget-max-ttl=%ds", gadgetMaxTTL)
+		log.Infof("Policy flag: deny-non-interactive=%t", denyNonInteractive)
+
+		if validateToken {
+			authzClientset, err := k8sutil.NewClientset("", "ig-daemon/token-authz")
+			if err != nil {
+				return fmt.Errorf("creating Kubernetes clientset for token authorization: %w", err)
+			}
+			service.SetAuthzKubeClientset(authzClientset)
+		}
 
 		if err = config.Config.ReadInConfig(); err != nil {
 			log.Warnf("reading config: %v", err)

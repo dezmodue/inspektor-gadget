@@ -77,6 +77,8 @@ type Service struct {
 	requirePodname bool
 	// validateToken enables request token authorization checks.
 	validateToken bool
+	// denyNonInteractive rejects interactive requests like --detach and --attach.
+	denyNonInteractive bool
 	// gadgetMaxTTL caps gadget runtime, 0 means disabled.
 	gadgetMaxTTL time.Duration
 
@@ -134,6 +136,10 @@ func (s *Service) SetFilterRequirements(requireNamespace, requirePodname bool) {
 
 func (s *Service) SetTokenValidation(enabled bool) {
 	s.validateToken = enabled
+}
+
+func (s *Service) SetDenyNonInteractive(enabled bool) {
+	s.denyNonInteractive = enabled
 }
 
 func (s *Service) SetGadgetMaxTTL(ttl time.Duration) {

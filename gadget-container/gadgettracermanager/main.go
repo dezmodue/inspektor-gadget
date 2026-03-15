@@ -78,14 +78,15 @@ import (
 )
 
 var (
-	serve             bool
-	liveness          bool
-	socketfile        string
-	gadgetServiceHost string
-	requireNamespace  bool
-	requirePodname    bool
-	validateToken     bool
-	gadgetMaxTTL      int
+	serve              bool
+	liveness           bool
+	socketfile         string
+	gadgetServiceHost  string
+	requireNamespace   bool
+	requirePodname     bool
+	validateToken      bool
+	gadgetMaxTTL       int
+	denyNonInteractive bool
 )
 
 var clientTimeout = 2 * time.Second
@@ -97,6 +98,7 @@ func init() {
 	flag.BoolVar(&requirePodname, "require-podname", false, "Reject RunGadget requests that do not include a valid k8s.podname filter clause")
 	flag.BoolVar(&validateToken, "validate-token", false, "Enable validation of request tokens against authorization.gadget.kinvolk.io Auth resources")
 	flag.IntVar(&gadgetMaxTTL, "gadget-max-ttl", 0, "Maximum gadget runtime in seconds (0 disables cap)")
+	flag.BoolVar(&denyNonInteractive, "deny-non-interactive", false, "Deny interactive gadget requests (for example requests that include --detach or --attach)")
 
 	flag.BoolVar(&serve, "serve", false, "Start server")
 	flag.BoolVar(&liveness, "liveness", false, "Execute as client and perform liveness probe")
@@ -104,6 +106,17 @@ func init() {
 
 func main() {
 	flag.Parse()
+
+	validateTokenFlagSet := false
+	denyNonInteractiveFlagSet := false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "validate-token":
+			validateTokenFlagSet = true
+		case "deny-non-interactive":
+			denyNonInteractiveFlagSet = true
+		}
+	})
 
 	if flag.NArg() > 0 {
 		fmt.Println("invalid command")
@@ -159,6 +172,13 @@ func main() {
 	if serve {
 		if validateToken && !requireNamespace {
 			log.Fatalf("--validate-token requires --require-namespace")
+		}
+
+		if validateToken {
+			if validateTokenFlagSet && !denyNonInteractiveFlagSet {
+				log.Warn("--validate-token was enabled without --deny-non-interactive; attach and detach operations will be denied automatically")
+			}
+			denyNonInteractive = true
 		}
 
 		if err := gadgettracermanagerconfig.Init(); err != nil {
@@ -220,8 +240,12 @@ func main() {
 		service.SetFilterRequirements(requireNamespace, requirePodname)
 		service.SetTokenValidation(validateToken)
 		service.SetGadgetMaxTTL(time.Duration(gadgetMaxTTL) * time.Second)
-		log.Infof("Policy flags: validate-token=%t require-namespace=%t require-podname=%t gadget-max-ttl=%ds",
-			validateToken, requireNamespace, requirePodname, gadgetMaxTTL)
+		service.SetDenyNonInteractive(denyNonInteractive)
+		log.Infof("Policy flag: validate-token=%t", validateToken)
+		log.Infof("Policy flag: require-namespace=%t", requireNamespace)
+		log.Infof("Policy flag: require-podname=%t", requirePodname)
+		log.Infof("Policy flag: gadget-max-ttl=%ds", gadgetMaxTTL)
+		log.Infof("Policy flag: deny-non-interactive=%t", denyNonInteractive)
 
 		mgr, err := instancemanager.New(local.New())
 		if err != nil {

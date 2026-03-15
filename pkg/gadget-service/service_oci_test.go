@@ -43,9 +43,14 @@ func TestHasNamespaceFilter(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:        "valid namespace with uppercase and digits",
-			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace==Team-42"},
+			name:        "valid namespace with lowercase and digits",
+			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace==team-42"},
 			want:        true,
+		},
+		{
+			name:        "namespace value contains uppercase",
+			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace==Team-42"},
+			want:        false,
 		},
 		{
 			name:        "namespace clause absent",
@@ -65,6 +70,16 @@ func TestHasNamespaceFilter(t *testing.T) {
 		{
 			name:        "namespace value is empty",
 			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace=="},
+			want:        false,
+		},
+		{
+			name:        "namespace value starts with dash",
+			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace==-team"},
+			want:        false,
+		},
+		{
+			name:        "namespace value ends with dash",
+			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace==team-"},
 			want:        false,
 		},
 		{
@@ -317,6 +332,11 @@ func TestNamespaceFromFilterParams(t *testing.T) {
 			wantErr:     true,
 		},
 		{
+			name:        "invalid namespace uppercase",
+			paramValues: map[string]string{operatorFilterParamKey: "k8s.namespace==Team-42"},
+			wantErr:     true,
+		},
+		{
 			name: "multiple different namespaces",
 			paramValues: map[string]string{
 				operatorFilterParamKey: "k8s.namespace==default,k8s.namespace==kube-system",
@@ -359,13 +379,14 @@ func TestValidateRequestTokenListCRDPermission(t *testing.T) {
 		errorContains       string
 	}{
 		{
-			name: "no token skips check",
+			name: "no token fails when validation enabled",
 			request: &api.GadgetRunRequest{
 				ParamValues: map[string]string{operatorFilterParamKey: "k8s.namespace==default"},
 			},
 			validationEnabled:   true,
 			expectCheckerCalled: false,
-			expectError:         false,
+			expectError:         true,
+			errorContains:       "missing request token",
 		},
 		{
 			name: "validation disabled skips check",
@@ -410,6 +431,17 @@ func TestValidateRequestTokenListCRDPermission(t *testing.T) {
 			expectError:         true,
 			errorContains:       "not authorized to list",
 		},
+		{
+			name: "missing authz clientset fails fast",
+			request: &api.GadgetRunRequest{
+				Token:       "TOKEN-SIMONE",
+				ParamValues: map[string]string{operatorFilterParamKey: "k8s.namespace==default"},
+			},
+			validationEnabled:   true,
+			expectCheckerCalled: false,
+			expectError:         true,
+			errorContains:       "token authorization clientset is not configured",
+		},
 	}
 
 	for _, tt := range tests {
@@ -419,16 +451,18 @@ func TestValidateRequestTokenListCRDPermission(t *testing.T) {
 
 			checkerCalled := false
 			svc := &Service{validateToken: tc.validationEnabled}
-			svc.tokenListCRDAuthzChecker = func(_ context.Context, token, namespace string) error {
-				checkerCalled = true
-				if token == "" {
-					t.Fatalf("expected non-empty token")
+				if tc.name != "missing authz clientset fails fast" {
+					svc.tokenListCRDAuthzChecker = func(_ context.Context, token, namespace string) error {
+						checkerCalled = true
+						if token == "" {
+							t.Fatalf("expected non-empty token")
+						}
+						if namespace != "default" {
+							t.Fatalf("expected namespace default, got %q", namespace)
+						}
+						return tc.authzErr
+					}
 				}
-				if namespace != "default" {
-					t.Fatalf("expected namespace default, got %q", namespace)
-				}
-				return tc.authzErr
-			}
 
 			err := svc.validateRequestTokenListCRDPermission(context.Background(), tc.request)
 			if tc.expectError {
@@ -446,6 +480,184 @@ func TestValidateRequestTokenListCRDPermission(t *testing.T) {
 				t.Fatalf("checkerCalled = %v, want %v", checkerCalled, tc.expectCheckerCalled)
 			}
 		})
+	}
+}
+
+func TestHasDetachArg(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "exact detach argument",
+			args: []string{"--detach"},
+			want: true,
+		},
+		{
+			name: "detach argument with value",
+			args: []string{"--detach=true"},
+			want: true,
+		},
+		{
+			name: "other arguments only",
+			args: []string{"--timeout", "10s"},
+			want: false,
+		},
+		{
+			name: "nil args",
+			args: nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hasDetachArg(tc.args); got != tc.want {
+				t.Fatalf("hasDetachArg() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasAttachArg(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "exact attach argument",
+			args: []string{"--attach"},
+			want: true,
+		},
+		{
+			name: "attach argument with value",
+			args: []string{"--attach=instance-123"},
+			want: true,
+		},
+		{
+			name: "other arguments only",
+			args: []string{"--timeout", "10s"},
+			want: false,
+		},
+		{
+			name: "nil args",
+			args: nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hasAttachArg(tc.args); got != tc.want {
+				t.Fatalf("hasAttachArg() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateNonInteractivePolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		svc         Service
+		request     *api.GadgetRunRequest
+		attachReq   bool
+		createReq   bool
+		expectError bool
+	}{
+		{
+			name: "deny-non-interactive disabled allows detach",
+			svc: Service{
+				denyNonInteractive: false,
+			},
+			request: &api.GadgetRunRequest{Args: []string{"--detach"}},
+			expectError: false,
+		},
+		{
+			name: "deny-non-interactive enabled rejects run request with detach",
+			svc: Service{
+				denyNonInteractive: true,
+			},
+			request:     &api.GadgetRunRequest{Args: []string{"--detach"}},
+			expectError: true,
+		},
+		{
+			name: "deny-non-interactive enabled rejects run request with attach",
+			svc: Service{
+				denyNonInteractive: true,
+			},
+			request:     &api.GadgetRunRequest{Args: []string{"--attach", "instance-123"}},
+			expectError: true,
+		},
+		{
+			name: "deny-non-interactive enabled allows run request without attach or detach",
+			svc: Service{
+				denyNonInteractive: true,
+			},
+			request:     &api.GadgetRunRequest{Args: []string{"--timeout", "10s"}},
+			expectError: false,
+		},
+		{
+			name: "deny-non-interactive enabled rejects attach request",
+			svc: Service{
+				denyNonInteractive: true,
+			},
+			attachReq:   true,
+			expectError: true,
+		},
+		{
+			name: "deny-non-interactive enabled rejects create request",
+			svc: Service{
+				denyNonInteractive: true,
+			},
+			createReq:   true,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.svc.validateNonInteractivePolicy(tc.request, tc.attachReq, tc.createReq)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCreateGadgetInstanceNonInteractivePolicy(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{denyNonInteractive: true}
+	_, err := svc.CreateGadgetInstance(context.Background(), &api.CreateGadgetInstanceRequest{
+		GadgetInstance: &api.GadgetInstance{
+			GadgetConfig: &api.GadgetRunRequest{},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--deny-non-interactive policy") {
+		t.Fatalf("expected policy rejection error, got %v", err)
 	}
 }
 
